@@ -33,10 +33,11 @@ app_ui = ui.page_fluid(
         ui.nav('Ask File',
                 ui.layout_sidebar(
                    ui.panel_sidebar(
-                       ui.input_file('document_input_file',
-                                     'Select a PDF file you wish to ask a question about',
-                                     multiple=False, accept='.pdf', button_label='Select',
+                       ui.input_file('document_input_files',
+                                     'Select one or more PDF file(s) you wish to ask a question about',
+                                     multiple=True, accept='.pdf', button_label='Select',
                                      placeholder='Your PDF here..'),
+                       ui.input_checkbox_group('uploaded_files', 'Selected file(s):', []),
                        ui.input_text_area('question_input_file', 'What wisdom do you seek from this file?', rows=4),
                        ui.input_slider('n_chunks_file', 'Number of chunks', min=1, max=5, value=3),
                        ui.input_action_button(id="run_process_file", label="Do Magic", class_='btn-success'),
@@ -45,7 +46,7 @@ app_ui = ui.page_fluid(
                    ),
                    ui.panel_main(
                        ui.panel_conditional(
-                           """input.run_process_file > 0 && input.question_input_file != ''""",  # && input.document_input_file != null
+                           """input.run_process_file > 0 && input.question_input_file != ''""",  # && input.document_input_files != null
                            ui.output_text('get_answer_file'),
                         ),
                    width=8,
@@ -83,11 +84,24 @@ def server(input, output, session):
         answer = re.sub('\s*</s>$', '', answer)
         return answer
 
+    @reactive.Effect
+    @reactive.event(input.document_input_files)
+    def _():
+        choices = [ file['name'] for file in input.document_input_files() ]
+        ui.update_checkbox_group('uploaded_files', label="Selected files:", choices=choices, selected=choices)
+
     @output()
     @render.text
     @reactive.event(input.run_process_file)
     async def get_answer_file():
-        db_items = embedding_loaded_pdf(file_path=input.document_input_file()[0]['datapath'], chunk_size=200, overlap=10)
+        db_items = []
+        documents = input.document_input_files()
+
+        for file in documents:
+            if file['name'] in input.uploaded_files():
+                file['db_items'] = embedding_loaded_pdf(file_path=file['datapath'], chunk_size=200, overlap=10)
+                db_items.extend(file['db_items'])
+
         answer = pipeline_return_question_and_answer(query=input.question_input_file(),
                                                      db_items=db_items,
                                                      n_chunks=input.n_chunks_file())
