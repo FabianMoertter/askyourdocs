@@ -27,17 +27,19 @@ app_ui = ui.page_fluid(
                            ui.output_text('get_answer_db'),
                         ),
                    width=8,
-                   ),
+                   ) ,
                ),
         ),
         ui.nav('Ask File',
                 ui.layout_sidebar(
                    ui.panel_sidebar(
                        ui.input_file('document_input_files',
-                                     'Select one or more PDF file(s) you wish to ask a question about',
-                                     multiple=True, accept='.pdf', button_label='Select',
-                                     placeholder='Your PDF here..'),
-                       ui.input_checkbox_group('uploaded_files', 'Selected file(s):', []),
+                                         'Select one or more PDF file(s) you wish to ask a question about',
+                                         multiple=True, accept='.pdf', button_label='Select',
+                                         placeholder='Your PDF here..'),
+                       ui.input_checkbox_group('selected_files', '', []),
+                       # Hide button with ui.panel_conditional()
+                       ui.input_action_button(id="remove_selected", label="Remove selected PDF(s)"),
                        ui.input_text_area('question_input_file', 'What wisdom do you seek from this file?', rows=4),
                        ui.input_slider('n_chunks_file', 'Number of chunks', min=1, max=5, value=3),
                        ui.input_action_button(id="run_process_file", label="Do Magic", class_='btn-success'),
@@ -47,7 +49,7 @@ app_ui = ui.page_fluid(
                    ui.panel_main(
                        ui.panel_conditional(
                            """input.run_process_file > 0 && input.question_input_file != ''""",  # && input.document_input_files != null
-                           ui.output_text('get_answer_file'),
+               ui.output_text('get_answer_file'),
                         ),
                    width=8,
                    ),
@@ -58,8 +60,20 @@ app_ui = ui.page_fluid(
     title='Ask Your Docs',
 )
 
-
 def server(input, output, session):
+
+    documents = reactive.Value([])
+
+    @reactive.Effect
+    @reactive.event(input.document_input_files)
+    def _():
+        docs = documents.get()
+        document_names = [ doc['name'] for doc in docs ]
+
+        for file in input.document_input_files():
+            if file['name'] not in document_names:
+                docs.append(file)
+        documents.set(docs)
 
     val = reactive.Value(3)
     @reactive.Effect
@@ -83,22 +97,39 @@ def server(input, output, session):
         answer = re.sub('^<pad>\s*', '', answer)
         answer = re.sub('\s*</s>$', '', answer)
         return answer
-
+    
     @reactive.Effect
     @reactive.event(input.document_input_files)
     def _():
-        choices = [ file['name'] for file in input.document_input_files() ]
-        ui.update_checkbox_group('uploaded_files', label="Selected files:", choices=choices, selected=choices)
+        docs = documents.get()
+        choices = [ file['name'] for file in docs ]
+        ui.update_checkbox_group('selected_files', label="Selected file(s):", choices=choices, selected=choices)
+
+    @reactive.Effect
+    @reactive.event(documents.get)
+    def _():
+        docs = documents.get()
+        choices = [ file['name'] for file in docs ]
+        ui.update_checkbox_group('selected_files', label="Selected file(s):", choices=choices, selected=choices)
+
+    @reactive.Effect
+    @reactive.event(input.remove_selected)
+    def _():
+        selected = input.selected_files()
+        docs = documents.get()
+        docs_to_keep = [ doc for doc in docs if doc['name'] not in selected ]
+        documents.set(docs_to_keep)
 
     @output()
     @render.text
     @reactive.event(input.run_process_file)
     async def get_answer_file():
         db_items = []
-        documents = input.document_input_files()
 
-        for file in documents:
-            if file['name'] in input.uploaded_files():
+        docs = documents.get()
+
+        for file in docs:
+            if file['name'] in input.selected_files():
                 file['db_items'] = embedding_loaded_pdf(file_path=file['datapath'], chunk_size=200, overlap=10)
                 db_items.extend(file['db_items'])
 
